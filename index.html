@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GovernanceOps Studio</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-frame">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <span class="brand-mark">GO</span>
+          <div>
+            <strong>GovernanceOps</strong>
+            <small>Assessment studio</small>
+          </div>
+        </div>
+
+        <button id="newAssessmentButton" class="new-button" type="button">+ New assessment</button>
+
+        <div class="sidebar-heading">
+          <span>Recent assessments</span>
+          <span id="assessmentCount">0</span>
+        </div>
+        <nav id="assessmentList" class="assessment-list" aria-label="Recent assessments"></nav>
+
+        <div class="sidebar-footer">
+          <span>Screening tool</span>
+          <small>Human approval required</small>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="workspace-header">
+          <div>
+            <p class="eyebrow">AI governance casework</p>
+            <h1 id="pageTitle">New AI system assessment</h1>
+          </div>
+          <div class="header-actions">
+            <span id="saveStatus" class="save-status">Not assessed</span>
+            <button id="exportJsonButton" class="quiet-button" type="button" disabled>Export JSON</button>
+            <button id="exportBriefButton" class="quiet-button" type="button" disabled>Export brief</button>
+          </div>
+        </header>
+
+        <div class="workspace-grid">
+          <section class="intake-column" aria-labelledby="intakeHeading">
+            <div class="section-title">
+              <span>01</span>
+              <div>
+                <p class="eyebrow">System intake</p>
+                <h2 id="intakeHeading">Describe the use case</h2>
+              </div>
+            </div>
+
+            <form id="assessmentForm" class="assessment-form">
+              <div class="field-grid two-column">
+                <label>
+                  <span>Assessment name</span>
+                  <input name="name" type="text" value="AI hiring support assistant" required>
+                </label>
+                <label>
+                  <span>Assessor</span>
+                  <input name="assessor" type="text" value="Silviya Silwal" required>
+                </label>
+              </div>
+
+              <label>
+                <span>Purpose and workflow</span>
+                <textarea name="description" rows="5" required>An AI assistant summarizes resumes and recommends candidates for recruiter review. It processes applicant information but cannot automatically reject a candidate.</textarea>
+              </label>
+
+              <div class="field-grid three-column">
+                <label>
+                  <span>Sector</span>
+                  <select id="sectorSelect" name="sector"></select>
+                </label>
+                <label>
+                  <span>Lifecycle stage</span>
+                  <select id="lifecycleSelect" name="lifecycleStage"></select>
+                </label>
+                <label>
+                  <span>Decision impact</span>
+                  <select id="impactSelect" name="decisionImpact"></select>
+                </label>
+              </div>
+
+              <div class="field-grid two-column">
+                <label>
+                  <span>Automation level</span>
+                  <select id="autonomySelect" name="autonomyLevel"></select>
+                </label>
+                <label>
+                  <span>Deployment scale</span>
+                  <select id="scaleSelect" name="deploymentScale"></select>
+                </label>
+              </div>
+
+              <fieldset>
+                <legend>Data categories</legend>
+                <div id="dataCategories" class="choice-grid"></div>
+              </fieldset>
+
+              <fieldset>
+                <legend>Affected groups</legend>
+                <div id="affectedGroups" class="choice-grid"></div>
+              </fieldset>
+
+              <fieldset>
+                <legend>Declared controls</legend>
+                <div class="control-toggles">
+                  <label class="toggle-row">
+                    <input name="thirdPartyModel" type="checkbox">
+                    <span>Uses a third-party model</span>
+                  </label>
+                  <label class="toggle-row">
+                    <input name="humanReview" type="checkbox" checked>
+                    <span>Human review is defined</span>
+                  </label>
+                  <label class="toggle-row">
+                    <input name="appealProcess" type="checkbox">
+                    <span>Appeal or remedy exists</span>
+                  </label>
+                  <label class="toggle-row">
+                    <input name="monitoringPlan" type="checkbox">
+                    <span>Monitoring plan exists</span>
+                  </label>
+                </div>
+              </fieldset>
+
+              <button id="runAssessmentButton" class="primary-button" type="submit">Run governance screening</button>
+              <p id="formError" class="form-error" role="alert"></p>
+            </form>
+          </section>
+
+          <section class="output-column" aria-labelledby="outputHeading">
+            <div id="emptyState" class="empty-state">
+              <span class="empty-index">02</span>
+              <h2 id="outputHeading">Assessment output</h2>
+              <p>Complete the intake to generate a risk register, evidence plan, framework map, and reviewer questions.</p>
+            </div>
+
+            <div id="assessmentOutput" class="assessment-output" hidden>
+              <section class="decision-band">
+                <div>
+                  <p class="eyebrow">Screening recommendation</p>
+                  <h2 id="decisionOutcome"></h2>
+                  <p id="assessmentSummary"></p>
+                </div>
+                <div class="risk-score">
+                  <span id="riskScore">0</span>
+                  <small id="riskLevel">low</small>
+                </div>
+              </section>
+
+              <nav class="result-tabs" aria-label="Assessment views">
+                <button class="result-tab is-active" type="button" data-tab="risks">Risk register</button>
+                <button class="result-tab" type="button" data-tab="evidence">Controls & evidence</button>
+                <button class="result-tab" type="button" data-tab="frameworks">Framework map</button>
+                <button class="result-tab" type="button" data-tab="review">Review</button>
+              </nav>
+
+              <div id="risksPanel" class="result-panel" data-panel="risks">
+                <div class="metric-strip">
+                  <div><span>Risk conditions</span><strong id="riskCount">0</strong></div>
+                  <div><span>Evidence items</span><strong id="evidenceCount">0</strong></div>
+                  <div><span>NLP signals</span><strong id="signalCount">0</strong></div>
+                </div>
+                <div id="signalList" class="signal-list"></div>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Risk</th><th>Domain</th><th>Inherent</th><th>Residual</th><th>Trace</th></tr></thead>
+                    <tbody id="riskTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div id="evidencePanel" class="result-panel" data-panel="evidence" hidden>
+                <div id="controlList" class="control-list"></div>
+              </div>
+
+              <div id="frameworksPanel" class="result-panel" data-panel="frameworks" hidden>
+                <div id="frameworkList" class="framework-list"></div>
+              </div>
+
+              <div id="reviewPanel" class="result-panel" data-panel="review" hidden>
+                <section class="review-questions">
+                  <h3>Open reviewer questions</h3>
+                  <ol id="questionList"></ol>
+                </section>
+                <form id="reviewForm" class="review-form">
+                  <div class="field-grid two-column">
+                    <label>
+                      <span>Review status</span>
+                      <select name="status">
+                        <option value="in_review">In review</option>
+                        <option value="approved_with_conditions">Approved with conditions</option>
+                        <option value="rejected">Rejected</option>
+                        <option value="retired">Retired</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Reviewer</span>
+                      <input name="reviewer" type="text" value="Silviya Silwal" required>
+                    </label>
+                  </div>
+                  <label>
+                    <span>Review note</span>
+                    <textarea name="note" rows="3" placeholder="Record the rationale and required conditions." required></textarea>
+                  </label>
+                  <button class="quiet-button" type="submit">Record review decision</button>
+                  <p id="reviewError" class="form-error" role="alert"></p>
+                </form>
+                <div id="auditTrail" class="audit-trail"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
