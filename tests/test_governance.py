@@ -129,6 +129,112 @@ class AssessmentStoreTests(unittest.TestCase):
                 "note": "This status must never be accepted."
             })
 
+    def test_approval_is_blocked_without_verified_evidence(self):
+        saved = self.store.save(self.assessment)
+
+        with self.assertRaisesRegex(ValueError, "Approval blocked"):
+            self.store.update_review(saved["assessmentId"], {
+                "status": "approved_with_conditions",
+                "reviewer": "Governance reviewer",
+                "note": "Attempt approval before evidence is verified."
+            })
+
+    def test_accepted_evidence_unlocks_approval(self):
+        saved = self.store.save(self.assessment)
+        control_ids = [control["id"] for control in saved["controlPlan"]]
+        with_evidence = self.store.add_evidence(saved["assessmentId"], {
+            "title": "Complete governance evidence pack",
+            "reference": "internal://governance/evidence-pack-v1",
+            "owner": "AI governance",
+            "submittedBy": "Evidence owner",
+            "version": "1.0",
+            "controlIds": control_ids
+        })
+        evidence_id = with_evidence["evidenceArtifacts"][0]["evidenceId"]
+        reviewed = self.store.review_evidence(saved["assessmentId"], evidence_id, {
+            "status": "accepted",
+            "reviewer": "Independent reviewer",
+            "note": "The evidence pack covers every required control for this screening."
+        })
+        approved = self.store.update_review(saved["assessmentId"], {
+            "status": "approved_with_conditions",
+            "reviewer": "Governance reviewer",
+            "note": "Approval granted subject to the recorded operational conditions."
+        })
+
+        self.assertEqual(reviewed["evidenceCoverage"]["percent"], 100)
+        self.assertEqual(approved["status"], "approved_with_conditions")
+
+    def test_expired_evidence_does_not_count_toward_coverage(self):
+        saved = self.store.save(self.assessment)
+        control_ids = [control["id"] for control in saved["controlPlan"]]
+        with_evidence = self.store.add_evidence(saved["assessmentId"], {
+            "title": "Expired evidence pack",
+            "reference": "internal://governance/expired-pack",
+            "owner": "AI governance",
+            "submittedBy": "Evidence owner",
+            "version": "0.9",
+            "expiresAt": "2000-01-01",
+            "controlIds": control_ids
+        })
+        evidence_id = with_evidence["evidenceArtifacts"][0]["evidenceId"]
+        reviewed = self.store.review_evidence(saved["assessmentId"], evidence_id, {
+            "status": "accepted",
+            "reviewer": "Independent reviewer",
+            "note": "The artifact is authentic but its validity period has expired."
+        })
+
+        self.assertEqual(reviewed["evidenceArtifacts"][0]["effectiveStatus"], "expired")
+        self.assertEqual(reviewed["evidenceCoverage"]["percent"], 0)
+
+    def test_revision_records_lineage_and_changes(self):
+        saved = self.store.save(self.assessment)
+        engine = GovernanceEngine(ROOT / "data" / "governance_taxonomy.json")
+        revised_assessment = engine.assess(AssessmentInput.from_dict(payload(
+            lifecycleStage="production",
+            monitoringPlan=True,
+            appealProcess=True
+        )))
+        revision = self.store.create_revision(saved["assessmentId"], revised_assessment)
+        previous = self.store.get(saved["assessmentId"])
+
+        self.assertEqual(revision["revision"], 2)
+        self.assertEqual(revision["rootAssessmentId"], saved["assessmentId"])
+        self.assertEqual(revision["previousRevisionId"], saved["assessmentId"])
+        self.assertEqual(previous["supersededBy"], revision["assessmentId"])
+        self.assertIn("monitoring_plan", {change["field"] for change in revision["revisionChanges"]})
+
+    def test_unchanged_revision_is_rejected(self):
+        saved = self.store.save(self.assessment)
+        engine = GovernanceEngine(ROOT / "data" / "governance_taxonomy.json")
+        unchanged = engine.assess(AssessmentInput.from_dict(payload()))
+
+        with self.assertRaisesRegex(ValueError, "No assessment changes detected"):
+            self.store.create_revision(saved["assessmentId"], unchanged)
+
+    def test_carried_evidence_requires_reverification(self):
+        saved = self.store.save(self.assessment)
+        control_ids = [control["id"] for control in saved["controlPlan"]]
+        with_evidence = self.store.add_evidence(saved["assessmentId"], {
+            "title": "Accepted control evidence",
+            "reference": "internal://governance/accepted-pack",
+            "owner": "AI governance",
+            "submittedBy": "Evidence owner",
+            "controlIds": control_ids
+        })
+        evidence_id = with_evidence["evidenceArtifacts"][0]["evidenceId"]
+        self.store.review_evidence(saved["assessmentId"], evidence_id, {
+            "status": "accepted",
+            "reviewer": "Independent reviewer",
+            "note": "Evidence accepted for the first assessment revision."
+        })
+        engine = GovernanceEngine(ROOT / "data" / "governance_taxonomy.json")
+        revised = engine.assess(AssessmentInput.from_dict(payload(monitoringPlan=True)))
+        revision = self.store.create_revision(saved["assessmentId"], revised)
+
+        self.assertEqual(revision["evidenceArtifacts"][0]["effectiveStatus"], "submitted")
+        self.assertFalse(revision["evidenceCoverage"]["approvalReady"])
+
 
 if __name__ == "__main__":
     unittest.main()

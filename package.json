@@ -1,7 +1,7 @@
 {
   "name": "governanceops-studio",
-  "version": "0.1.0",
-  "description": "Auditable AI governance risk assessment and evidence-planning workspace.",
+  "version": "0.2.0",
+  "description": "Auditable AI governance risk assessment, evidence verification, and decision-review workspace.",
   "scripts": {
     "start": "python3 server.py",
     "check": "python3 -m py_compile server.py governance/models.py governance/engine.py governance/storage.py && node --check app.js && python3 -m unittest discover -s tests -v"

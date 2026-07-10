@@ -4,10 +4,13 @@ let currentAssessment = null;
 const elements = {
   form: document.getElementById("assessmentForm"),
   reviewForm: document.getElementById("reviewForm"),
+  evidenceForm: document.getElementById("evidenceForm"),
   formError: document.getElementById("formError"),
   reviewError: document.getElementById("reviewError"),
+  evidenceError: document.getElementById("evidenceError"),
   runButton: document.getElementById("runAssessmentButton"),
   newButton: document.getElementById("newAssessmentButton"),
+  revisionButton: document.getElementById("createRevisionButton"),
   list: document.getElementById("assessmentList"),
   count: document.getElementById("assessmentCount"),
   pageTitle: document.getElementById("pageTitle"),
@@ -16,6 +19,7 @@ const elements = {
   output: document.getElementById("assessmentOutput"),
   decisionOutcome: document.getElementById("decisionOutcome"),
   summary: document.getElementById("assessmentSummary"),
+  revisionLabel: document.getElementById("revisionLabel"),
   riskScore: document.getElementById("riskScore"),
   riskLevel: document.getElementById("riskLevel"),
   riskScoreBox: document.querySelector(".risk-score"),
@@ -28,6 +32,13 @@ const elements = {
   frameworkList: document.getElementById("frameworkList"),
   questionList: document.getElementById("questionList"),
   auditTrail: document.getElementById("auditTrail"),
+  coverageLabel: document.getElementById("coverageLabel"),
+  coverageBar: document.getElementById("coverageBar"),
+  approvalReadiness: document.getElementById("approvalReadiness"),
+  evidenceControlSelect: document.getElementById("evidenceControlSelect"),
+  artifactList: document.getElementById("artifactList"),
+  revisionSummary: document.getElementById("revisionSummary"),
+  approvalGateMessage: document.getElementById("approvalGateMessage"),
   exportJson: document.getElementById("exportJsonButton"),
   exportBrief: document.getElementById("exportBriefButton")
 };
@@ -176,7 +187,9 @@ function renderControls(controls, evidence) {
     const header = document.createElement("header");
     const heading = document.createElement("div");
     heading.append(makeElement("h3", "", control.name), makeElement("p", "", `${control.owner} | ${item.artifact}`));
-    const statusClass = item.status.startsWith("declared") ? "evidence-status declared" : "evidence-status";
+    const positiveStatus = item.status === "verified" || item.status.startsWith("declared");
+    const pendingStatus = item.status.startsWith("submitted");
+    const statusClass = positiveStatus ? "evidence-status declared" : pendingStatus ? "evidence-status pending" : "evidence-status";
     header.append(heading, makeElement("span", statusClass, item.status));
     const tags = makeElement("div", "framework-tags");
     control.frameworkIds.forEach((id) => tags.append(makeElement("span", "", id)));
@@ -184,6 +197,104 @@ function renderControls(controls, evidence) {
     return article;
   });
   elements.controlList.replaceChildren(...cards);
+}
+
+function renderEvidenceCoverage(coverage) {
+  elements.coverageLabel.textContent = `${coverage.verifiedControlCount} of ${coverage.requiredControlCount} controls verified`;
+  elements.coverageBar.style.width = `${coverage.percent}%`;
+  elements.approvalReadiness.textContent = coverage.approvalReady ? "Approval evidence ready" : "Approval blocked";
+  elements.approvalReadiness.className = coverage.approvalReady ? "readiness-badge ready" : "readiness-badge";
+  const approvalOption = elements.reviewForm.querySelector('option[value="approved_with_conditions"]');
+  approvalOption.disabled = !coverage.approvalReady || Boolean(currentAssessment?.supersededBy);
+  elements.approvalGateMessage.textContent = coverage.approvalReady
+    ? "All required controls have accepted, current evidence."
+    : `${coverage.blockedControlIds.length} required control(s) still need accepted, current evidence.`;
+}
+
+function populateEvidenceControls(controls) {
+  elements.evidenceControlSelect.replaceChildren(...controls.map((control) => new Option(`${control.name} (${control.id})`, control.id)));
+}
+
+function evidenceStatusClass(status) {
+  if (status === "accepted") return "evidence-status declared";
+  if (status === "submitted") return "evidence-status pending";
+  return "evidence-status";
+}
+
+function artifactReferenceNode(reference) {
+  if (/^https?:\/\//i.test(reference)) {
+    const link = makeElement("a", "artifact-reference", reference);
+    link.href = reference;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    return link;
+  }
+  return makeElement("code", "artifact-reference", reference);
+}
+
+function renderArtifacts(artifacts) {
+  if (!artifacts.length) {
+    elements.artifactList.replaceChildren(makeElement("p", "empty-copy", "No evidence artifacts submitted for this revision."));
+    return;
+  }
+  const cards = artifacts.map((artifact) => {
+    const article = makeElement("article", "artifact-item");
+    const header = document.createElement("header");
+    const heading = document.createElement("div");
+    heading.append(makeElement("h3", "", artifact.title), makeElement("p", "", `${artifact.owner} | version ${artifact.version}`));
+    header.append(heading, makeElement("span", evidenceStatusClass(artifact.effectiveStatus), artifact.effectiveStatus));
+    const details = makeElement("div", "artifact-details");
+    details.append(artifactReferenceNode(artifact.reference));
+    details.append(makeElement("small", "", `Submitted by ${artifact.submittedBy} on ${formatTime(artifact.submittedAt)}`));
+    if (artifact.expiresAt) details.append(makeElement("small", "", `Expires ${artifact.expiresAt}`));
+    if (artifact.carriedFromRevision) details.append(makeElement("small", "", `Carried from revision ${artifact.carriedFromRevision}`));
+    const tags = makeElement("div", "framework-tags");
+    artifact.controlIds.forEach((controlId) => tags.append(makeElement("span", "", controlId)));
+    article.append(header, details, tags);
+    if (artifact.verification) {
+      article.append(makeElement("p", "verification-note", `${artifact.verification.reviewer}: ${artifact.verification.note}`));
+    }
+    if (["submitted", "rejected"].includes(artifact.effectiveStatus)) {
+      const form = makeElement("form", "artifact-review-form");
+      const reviewer = document.createElement("input");
+      reviewer.name = "reviewer";
+      reviewer.type = "text";
+      reviewer.placeholder = "Reviewer";
+      reviewer.value = elements.reviewForm.elements.namedItem("reviewer").value;
+      reviewer.required = true;
+      const note = document.createElement("textarea");
+      note.name = "note";
+      note.rows = 2;
+      note.placeholder = "Evidence review rationale";
+      note.required = true;
+      const actions = makeElement("div", "artifact-actions");
+      const accept = makeElement("button", "quiet-button", "Accept");
+      accept.type = "submit";
+      accept.value = "accepted";
+      const reject = makeElement("button", "danger-button", "Reject");
+      reject.type = "submit";
+      reject.value = "rejected";
+      actions.append(accept, reject);
+      form.append(reviewer, note, actions);
+      form.addEventListener("submit", (event) => reviewEvidence(event, artifact.evidenceId));
+      article.append(form);
+    }
+    return article;
+  });
+  elements.artifactList.replaceChildren(...cards);
+}
+
+function renderRevisionSummary(assessment) {
+  const changes = assessment.revisionChanges || [];
+  if (assessment.revision === 1 || !changes.length) {
+    elements.revisionSummary.hidden = true;
+    elements.revisionSummary.replaceChildren();
+    return;
+  }
+  elements.revisionSummary.hidden = false;
+  const list = document.createElement("ul");
+  changes.forEach((change) => list.append(makeElement("li", "", `${titleCase(change.field)}: ${JSON.stringify(change.before)} → ${JSON.stringify(change.after)}`)));
+  elements.revisionSummary.replaceChildren(makeElement("h3", "", `Changes in revision ${assessment.revision}`), list);
 }
 
 function renderFrameworks(frameworks) {
@@ -225,9 +336,12 @@ function renderAssessment(assessment) {
   elements.emptyState.hidden = true;
   elements.output.hidden = false;
   elements.pageTitle.textContent = assessment.input.name;
-  elements.saveStatus.textContent = `${titleCase(assessment.status)} | ${formatTime(assessment.generatedAt)}`;
+  elements.saveStatus.textContent = `Rev ${assessment.revision} | ${titleCase(assessment.status)} | ${formatTime(assessment.generatedAt)}`;
   elements.decisionOutcome.textContent = assessment.decision.outcome;
   elements.summary.textContent = assessment.summary;
+  elements.revisionLabel.textContent = assessment.supersededBy
+    ? `Revision ${assessment.revision} • superseded by ${assessment.supersededBy}`
+    : `Revision ${assessment.revision} • current assessment`;
   elements.riskScore.textContent = assessment.overallScore;
   elements.riskLevel.textContent = assessment.riskLevel;
   elements.riskScoreBox.className = `risk-score ${assessment.riskLevel}`;
@@ -237,12 +351,17 @@ function renderAssessment(assessment) {
   renderSignals(assessment.signals);
   renderRiskRegister(assessment.riskRegister);
   renderControls(assessment.controlPlan, assessment.evidenceChecklist);
+  renderEvidenceCoverage(assessment.evidenceCoverage);
+  populateEvidenceControls(assessment.controlPlan);
+  renderArtifacts(assessment.evidenceArtifacts);
   renderFrameworks(assessment.frameworkMap);
   renderQuestions(assessment.reviewQuestions);
   renderAuditTrail(assessment.auditTrail);
+  renderRevisionSummary(assessment);
   fillForm(assessment.input);
   elements.exportJson.disabled = false;
   elements.exportBrief.disabled = false;
+  elements.revisionButton.disabled = Boolean(assessment.supersededBy);
   refreshAssessmentList();
 }
 
@@ -288,13 +407,80 @@ async function submitReview(event) {
   }
 }
 
+async function submitEvidence(event) {
+  event.preventDefault();
+  elements.evidenceError.textContent = "";
+  if (!currentAssessment) return;
+  const formData = new FormData(elements.evidenceForm);
+  const controlIds = [...elements.evidenceControlSelect.selectedOptions].map((option) => option.value);
+  try {
+    const assessment = await fetchJson(`/api/assessments/${currentAssessment.assessmentId}/evidence`, {
+      method: "POST",
+      body: JSON.stringify({
+        title: formData.get("title"),
+        reference: formData.get("reference"),
+        owner: formData.get("owner"),
+        submittedBy: formData.get("submittedBy"),
+        version: formData.get("version"),
+        effectiveDate: formData.get("effectiveDate"),
+        expiresAt: formData.get("expiresAt"),
+        controlIds
+      })
+    });
+    elements.evidenceForm.elements.namedItem("title").value = "";
+    elements.evidenceForm.elements.namedItem("reference").value = "";
+    renderAssessment(assessment);
+    showTab("evidence");
+  } catch (error) {
+    elements.evidenceError.textContent = error.message;
+  }
+}
+
+async function reviewEvidence(event, evidenceId) {
+  event.preventDefault();
+  const formData = new FormData(event.currentTarget);
+  try {
+    const assessment = await fetchJson(`/api/assessments/${currentAssessment.assessmentId}/evidence/${evidenceId}/verify`, {
+      method: "POST",
+      body: JSON.stringify({ status: event.submitter.value, reviewer: formData.get("reviewer"), note: formData.get("note") })
+    });
+    renderAssessment(assessment);
+    showTab("evidence");
+  } catch (error) {
+    elements.evidenceError.textContent = error.message;
+  }
+}
+
+async function createRevision() {
+  if (!currentAssessment) return;
+  elements.formError.textContent = "";
+  elements.revisionButton.disabled = true;
+  elements.revisionButton.textContent = "Saving revision...";
+  try {
+    const revision = await fetchJson(`/api/assessments/${currentAssessment.assessmentId}/revisions`, {
+      method: "POST",
+      body: JSON.stringify(assessmentPayload())
+    });
+    renderAssessment(revision);
+    showTab("review");
+  } catch (error) {
+    elements.formError.textContent = error.message;
+    elements.revisionButton.disabled = false;
+  } finally {
+    elements.revisionButton.textContent = "Save as revision";
+  }
+}
+
 async function refreshAssessmentList() {
   const body = await fetchJson("/api/assessments");
   elements.count.textContent = body.assessments.length;
   const buttons = body.assessments.map((assessment) => {
     const button = document.createElement("button");
     if (assessment.assessmentId === currentAssessment?.assessmentId) button.classList.add("is-active");
-    button.append(makeElement("strong", "", assessment.name), makeElement("small", "", `${titleCase(assessment.riskLevel)} | ${titleCase(assessment.status)}`));
+    button.append(
+      makeElement("strong", "", assessment.name),
+      makeElement("small", "", `Rev ${assessment.revision} | ${titleCase(assessment.riskLevel)} | ${assessment.evidenceCoverage.percent}% evidence`)
+    );
     button.addEventListener("click", async () => renderAssessment(await fetchJson(`/api/assessments/${assessment.assessmentId}`)));
     return button;
   });
@@ -315,6 +501,7 @@ function resetWorkspace() {
   elements.saveStatus.textContent = "Not assessed";
   elements.exportJson.disabled = true;
   elements.exportBrief.disabled = true;
+  elements.revisionButton.disabled = true;
   elements.formError.textContent = "";
   refreshAssessmentList();
 }
@@ -324,6 +511,7 @@ function governanceBrief(assessment) {
     `# ${assessment.input.name}`,
     "",
     `Assessment ID: ${assessment.assessmentId}`,
+    `Revision: ${assessment.revision}`,
     `Status: ${titleCase(assessment.status)}`,
     `Risk level: ${titleCase(assessment.riskLevel)} (${assessment.overallScore})`,
     `Recommendation: ${titleCase(assessment.decision.outcome)}`,
@@ -339,6 +527,14 @@ function governanceBrief(assessment) {
     "## Evidence Checklist",
     "",
     ...assessment.evidenceChecklist.map((item) => `- [ ] ${item.artifact} — ${item.owner} — ${item.status}`),
+    "",
+    `Verified evidence coverage: ${assessment.evidenceCoverage.percent}%`,
+    "",
+    "## Evidence Artifacts",
+    "",
+    ...(assessment.evidenceArtifacts.length
+      ? assessment.evidenceArtifacts.map((item) => `- **${item.title}** — ${item.effectiveStatus} — ${item.reference}`)
+      : ["No evidence artifacts submitted."]),
     "",
     "## Reviewer Questions",
     "",
@@ -363,7 +559,9 @@ function saveFile(filename, content, type) {
 document.querySelectorAll(".result-tab").forEach((button) => button.addEventListener("click", () => showTab(button.dataset.tab)));
 elements.form.addEventListener("submit", submitAssessment);
 elements.reviewForm.addEventListener("submit", submitReview);
+elements.evidenceForm.addEventListener("submit", submitEvidence);
 elements.newButton.addEventListener("click", resetWorkspace);
+elements.revisionButton.addEventListener("click", createRevision);
 elements.exportJson.addEventListener("click", () => saveFile(`${currentAssessment.assessmentId}.json`, JSON.stringify(currentAssessment, null, 2), "application/json"));
 elements.exportBrief.addEventListener("click", () => saveFile(`${currentAssessment.assessmentId}.md`, governanceBrief(currentAssessment), "text/markdown"));
 

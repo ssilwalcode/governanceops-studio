@@ -13,7 +13,8 @@ ROOT = Path(__file__).resolve().parent
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "5190"))
 ENGINE = GovernanceEngine(ROOT / "data" / "governance_taxonomy.json")
-STORE = AssessmentStore(ROOT / "data" / "assessments.json")
+ASSESSMENTS_PATH = Path(os.environ.get("ASSESSMENTS_PATH", ROOT / "data" / "assessments.json"))
+STORE = AssessmentStore(ASSESSMENTS_PATH)
 
 
 class GovernanceHandler(BaseHTTPRequestHandler):
@@ -81,11 +82,30 @@ class GovernanceHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         pathname = urlparse(self.path).path
+        parts = [part for part in pathname.split("/") if part]
         try:
             if pathname == "/api/assessments":
                 assessment_input = AssessmentInput.from_dict(self.read_json())
                 assessment = STORE.save(ENGINE.assess(assessment_input))
                 self.send_json(201, assessment)
+                return
+            if len(parts) == 4 and parts[:2] == ["api", "assessments"] and parts[3] == "revisions":
+                assessment_input = AssessmentInput.from_dict(self.read_json())
+                revision = STORE.create_revision(parts[2], ENGINE.assess(assessment_input))
+                self.send_json(201, revision) if revision else self.send_json(404, {"error": "Assessment not found."})
+                return
+            if len(parts) == 4 and parts[:2] == ["api", "assessments"] and parts[3] == "evidence":
+                assessment = STORE.add_evidence(parts[2], self.read_json())
+                self.send_json(201, assessment) if assessment else self.send_json(404, {"error": "Assessment not found."})
+                return
+            if (
+                len(parts) == 6
+                and parts[:2] == ["api", "assessments"]
+                and parts[3] == "evidence"
+                and parts[5] == "verify"
+            ):
+                assessment = STORE.review_evidence(parts[2], parts[4], self.read_json())
+                self.send_json(200, assessment) if assessment else self.send_json(404, {"error": "Assessment not found."})
                 return
             if pathname.startswith("/api/assessments/") and pathname.endswith("/review"):
                 assessment_id = pathname.split("/")[-2]
